@@ -90,6 +90,18 @@ function CtrlC() {
 	exit 1
 }
 
+#send mail to your account
+
+function send_email() {
+    local subject="$1"
+    local message="$2"
+    #TODO: change mail recipients to yours
+    local recipient="your_email@example.com"  
+
+    echo -e "${message}" | mail -s "${subject}" "${recipient}"
+}
+
+
 #
 # Check for root
 #
@@ -200,3 +212,16 @@ fi
 echo
 echo "DONE!"
 echo "$(date +"%H:%M:%S"): Backup created: ${backupDir}"
+
+#
+# Send mail on success or failure
+#
+if [ "$send_backup" = true ] ; then
+    if [ $? -eq 0 ]; then
+        success_msg="Offsite backup successful.\nBackup directory: ${backupDir}"
+        send_email "Backup Successful" "$success_msg"
+    else
+        error_msg="Something went wrong while sending offsite backup.\nBackup directory: ${backupDir}"
+        send_email "Backup Failed" "$error_msg"
+    fi
+fi
