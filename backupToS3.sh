@@ -66,7 +66,7 @@ bucket_name='your bucket name'
 # TODO: if you want to send the backup to S3 AWS
 send_backup=true
 #TODO: you need to change the hostname
-hostName='localhost'
+hostName=$(grep DB_HOST /bitnami/wordpress/wp-config.php | awk -F\' '{print$4}')
 
 # File name for file backup
 # If you prefer another file name, you'll also have to change the WordpressRestore.sh script.
@@ -170,7 +170,7 @@ if [ "$send_backup" = true ] ; then
         printf "\n%s\n\n" "$msg"
     else
         msg="Something went wrong while sending offsite backup."
-        log_error"$msg"
+        log_error "$msg"
         printf "\n%s\n\n" "$msg"
     fi
 fi
@@ -181,8 +181,8 @@ echo "$(date +"%H:%M:%S"): Backup Wordpress database..."
 log_message "$(date +"%H:%M:%S"): Backup Wordpress database..."
 
 if ! [ -x "$(command -v mysqldump)" ]; then
-    errorecho "ERROR: MySQL/MariaDB not installed (command mysqldump not found)."
-    log_error "ERROR: MySQL/MariaDB not installed (command mysqldump not found)."
+    errorecho "ERROR: MySQL/MariaDB not installed \(command mysqldump not found\)."
+    log_error "ERROR: MySQL/MariaDB not installed \(command mysqldump not found\)."
     errorecho "ERROR: No backup of database possible!"
     log_error "ERROR: No backup of database possible!"
 else
@@ -228,8 +228,8 @@ then
 	if [[ ${nrOfBackups} > ${maxNrOfBackups} ]]
 	then
 		echo "$(date +"%H:%M:%S"): Removing old backups..."
-        log_message "$(date +"%H:%M:%S: Removing old backups..."
-		ls -t ${backupMainDir} | tail -$(( nrOfBackups - maxNrOfBackups )) | while read -r dirToRemove; do
+        log_message "$(date +"%H:%M:%S"): Removing old backups..."
+        ls -t ${backupMainDir} | tail -$(( nrOfBackups - maxNrOfBackups )) | while read -r dirToRemove; do
 			echo "${dirToRemove}"
 			rm -r "${backupMainDir}/${dirToRemove:?}"
 			echo "Done"
