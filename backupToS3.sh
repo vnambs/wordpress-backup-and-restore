@@ -66,7 +66,7 @@ bucket_name='your bucket name'
 # TODO: if you want to send the backup to S3 AWS
 send_backup=true
 #TODO: you need to change the hostname
-hostName='localhost'
+hostName=$(grep DB_HOST /bitnami/wordpress/wp-config.php | awk -F\' '{print$4}')
 
 # File name for file backup
 # If you prefer another file name, you'll also have to change the WordpressRestore.sh script.
@@ -90,12 +90,39 @@ function CtrlC() {
 	exit 1
 }
 
+#send mail to your account
+
+function send_email() {
+    local subject="$1"
+    local message="$2"
+    #TODO: change mail recipients to yours
+    local recipient="your_email@example.com"  
+
+    echo -e "${message}" | mail -s "${subject}" "${recipient}"
+}
+
+# Définir le chemin vers le fichier de journal
+logFile="/var/log/wordpress_backup.log"
+
+# Fonction pour journaliser les messages
+log_message() {
+    local message="$1"
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - ${message}" >> "$logFile"
+}
+
+# Fonction pour journaliser les erreurs
+log_error() {
+    local message="$1"
+    echo "$(date +"%Y-%m-%d %H:%M:%S") [ERROR] - ${message}" >> "$logFile"
+}
+
 #
 # Check for root
 #
 if [ "$(id -u)" != "0" ]
 then
 	errorecho "ERROR: This script has to be run as root!"
+    log_error "ERROR: This script has to be run as root!"
 	exit 1
 fi
 
@@ -107,6 +134,7 @@ then
 	mkdir -p "${backupDir}"
 else
 	errorecho "ERROR: The backup directory ${backupDir} already exists!"
+    log_error "ERROR: The backup directory ${backupDir} already exists"
 	exit 1
 fi
 
@@ -114,6 +142,7 @@ fi
 # Stop web server
 #
 echo "$(date +"%H:%M:%S"): Stopping web server..."
+log_message "$(date +"%H:%M:%S"): Stopping web server..."
 systemctl stop "${webserverServiceName}"
 echo "Done"
 echo
@@ -122,6 +151,7 @@ echo
 # Backup file directory
 #
 echo "$(date +"%H:%M:%S"): Creating backup of Wordpress file directory..."
+log_message "$(date +"%H:%M:%S"): Creating backup of Wordpress file directory..."
 if [ "$useCompression" = true ] ; then
 	`$compressionCommand "${backupDir}/${fileNameBackupFileDir}" -C "${wordpressFileDir}" .`
 else
@@ -129,15 +159,18 @@ else
 fi
 echo "Done"
 echo
-echo "upload file to AWS S3"
+echo "uploading file to AWS S3"
+log_message "Uploading file to AWS S3"
 #send the backup offsite
 if [ "$send_backup" = true ] ; then
     cmd="aws s3 cp $backupDir/$fileNameBackupFileDir s3://$bucket_name/$backupDir/ --only-show-errors"
     if $cmd ; then
         msg="Offsite backup successful."
+        log_message "$msg"
         printf "\n%s\n\n" "$msg"
     else
         msg="Something went wrong while sending offsite backup."
+        log_error "$msg"
         printf "\n%s\n\n" "$msg"
     fi
 fi
@@ -145,25 +178,31 @@ fi
 # Backup DB
 #
 echo "$(date +"%H:%M:%S"): Backup Wordpress database..."
+log_message "$(date +"%H:%M:%S"): Backup Wordpress database..."
 
 if ! [ -x "$(command -v mysqldump)" ]; then
-    errorecho "ERROR: MySQL/MariaDB not installed (command mysqldump not found)."
+    errorecho "ERROR: MySQL/MariaDB not installed \(command mysqldump not found\)."
+    log_error "ERROR: MySQL/MariaDB not installed \(command mysqldump not found\)."
     errorecho "ERROR: No backup of database possible!"
+    log_error "ERROR: No backup of database possible!"
 else
     mysqldump --single-transaction -h "${hostName}" -u "${dbUser}" -p"${dbPassword}" "${wordpressDatabase}" > "${backupDir}/${fileNameBackupDb}"
 fi
 
 echo "Done"
 echo
-echo "upload file to AWS S3"
+echo "upload sql file to AWS S3"
+log_message "Uploading sql file to AWS S3"
 #send the backup offsite
 if [ "$send_backup" = true ] ; then
     cmd="aws s3 cp $backupDir/$fileNameBackupDb s3://$bucket_name/$backupDir/ --only-show-errors"
     if $cmd ; then
-        msg="Offsite backup successful."
+        msg="Offsite backup successful."      
+        log_message "$msg"
         printf "\n%s\n\n" "$msg"
     else
         msg="Something went wrong while sending offsite backup."
+        log_error "$msg"
         printf "\n%s\n\n" "$msg"
     fi
 fi
@@ -173,6 +212,7 @@ fi
 # Start web server
 #
 echo "$(date +"%H:%M:%S"): Starting web server..."
+log_message "Starting web server"
 systemctl start "${webserverServiceName}"
 echo "Done"
 echo
@@ -188,7 +228,8 @@ then
 	if [[ ${nrOfBackups} > ${maxNrOfBackups} ]]
 	then
 		echo "$(date +"%H:%M:%S"): Removing old backups..."
-		ls -t ${backupMainDir} | tail -$(( nrOfBackups - maxNrOfBackups )) | while read -r dirToRemove; do
+        log_message "$(date +"%H:%M:%S"): Removing old backups..."
+        ls -t ${backupMainDir} | tail -$(( nrOfBackups - maxNrOfBackups )) | while read -r dirToRemove; do
 			echo "${dirToRemove}"
 			rm -r "${backupMainDir}/${dirToRemove:?}"
 			echo "Done"
@@ -200,3 +241,18 @@ fi
 echo
 echo "DONE!"
 echo "$(date +"%H:%M:%S"): Backup created: ${backupDir}"
+
+#
+# Send mail on success or failure
+#
+if [ "$send_backup" = true ] ; then
+    if [ $? -eq 0 ]; then
+        success_msg="Offsite backup successful.\nBackup directory: ${backupDir}"
+        log_message "Send mail on success or failure"
+        send_email "Backup Successful" "$success_msg"
+    else
+        error_msg="Something went wrong while sending offsite backup.\nBackup directory: ${backupDir}"
+        log_error "ERROR: Send email on success or failure"
+        send_email "Backup Failed" "$error_msg"
+    fi
+fi
